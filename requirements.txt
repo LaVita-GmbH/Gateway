@@ -1,0 +1,4 @@
+starlette
+aiohttp
+python-dotenv
+jsonpath-ng
