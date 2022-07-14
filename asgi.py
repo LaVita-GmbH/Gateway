@@ -18,7 +18,7 @@ from jsonpath_ng import parse as jsonpath_parse
 load_dotenv()
 _logger = logging.getLogger(__name__)
 ENV_SERVICE_PREFIX = 'SERVICE_'
-SERVICE_URLS = {key.removeprefix(ENV_SERVICE_PREFIX).lower(): value for key, value in os.environ.items() if key.startswith(ENV_SERVICE_PREFIX)}
+SERVICE_URLS = {key.removeprefix(ENV_SERVICE_PREFIX).lower().replace('_', '-'): value for key, value in os.environ.items() if key.startswith(ENV_SERVICE_PREFIX)}
 
 
 async def _load_related_data(relation: list[str], curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, **lookup):
