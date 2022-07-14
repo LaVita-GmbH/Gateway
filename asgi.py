@@ -163,8 +163,8 @@ async def load_referenced_data(values: dict, headers: dict = {}, parent: Optiona
 async def _proxy(method, service, path, headers, params, data=None) -> Tuple[ClientResponse, Any]:
     base_url = SERVICE_URLS[service]
     url = f"{base_url}/{service}/{path}"
-    if path == 'docs':
-        url = f"{base_url}/docs"
+    if path in ('docs', 'redoc'):
+        url = f"{base_url}/{path}"
 
     async with aiohttp.request(
         method,
@@ -198,6 +198,13 @@ async def resolver(request: Request):
     return Response(data, headers=headers)
 
 
+async def healthcheck():
+    return JSONResponse({
+        'services': list(SERVICE_URLS.keys()),
+    })
+
+
 app = Starlette(routes=[
-    Route('/{service:str}/{path:path}', resolver, methods=['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'HEAD', 'OPTIONS'])
+    Route('/{service:str}/{path:path}', resolver, methods=['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'HEAD', 'OPTIONS']),
+    Route('/', healthcheck)
 ])
