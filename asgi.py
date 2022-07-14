@@ -175,7 +175,9 @@ async def _proxy(method, service, path, headers, params, data=None) -> Tuple[Cli
     ) as response:
         if 'application/json' in response.headers.get('Content-Type'):
             data = await response.json()
-            await load_referenced_data(data, headers=headers)
+            if path != 'openapi.json':
+                await load_referenced_data(data, headers=headers)
+
             return response, data
 
         return response, await response.text()
