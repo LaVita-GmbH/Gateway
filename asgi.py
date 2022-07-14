@@ -198,7 +198,7 @@ async def resolver(request: Request):
     return Response(data, headers=headers)
 
 
-async def healthcheck():
+async def healthcheck(request: Request):
     return JSONResponse({
         'services': list(SERVICE_URLS.keys()),
     })
