@@ -41,7 +41,7 @@ async def resolver(request: Request):
 
 async def healthcheck(request: Request):
     return JSONResponse({
-        'services': settings.SERVICE_URLS.keys(),
+        'services': list(settings.SERVICE_URLS.keys()),
     })
 
 
