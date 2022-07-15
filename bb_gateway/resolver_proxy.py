@@ -1,11 +1,13 @@
+from datetime import timedelta
 import functools
 import logging
-from pydoc import describe
 import re
 import asyncio
 from typing import Any, Optional, Tuple
 from urllib.parse import urlencode
+import orjson as json
 import aiohttp
+from redis.asyncio import Redis
 from aiohttp.client import ClientResponse
 from aiohttp.client_exceptions import InvalidURL
 from jsonpath_ng import parse as jsonpath_parse
@@ -17,19 +19,14 @@ from . import settings
 _logger = logging.getLogger(__name__)
 
 
-def _load_related_data(relation: list[str], curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, *, _parent_span: Span, **lookup) -> asyncio.Task:
+redis = Redis.from_url(settings.REDIS_URL)
+
+
+def _load_related_data(relation: list[str], cache_key: str, curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, *, _parent_span: Span, **lookup) -> asyncio.Task:
     if _cache is None:
         _cache = {}
 
-    def get_params() -> str:
-        if '$rel_params' not in curr_obj:
-            return ''
-
-        return f'?{urlencode(curr_obj["$rel_params"])}'
-
-    cache_key = '/'.join(relation)
     if id:
-        cache_key += f'/{id}{get_params()}'
         if cache_key not in _cache:
             _cache[cache_key] = asyncio.create_task(proxy(
                 method='GET',
@@ -96,25 +93,54 @@ def resolve_placeholder(value, curr_obj):
     )
 
 
+def get_cache_key(relation, curr_obj, id: Optional[str] = None, **lookup):
+    def get_params() -> str:
+        if '$rel_params' not in curr_obj:
+            return ''
+
+        return f'?{urlencode(curr_obj["$rel_params"])}'
+
+    cache_key = '/'.join(relation)
+    if id:
+        cache_key += f'/{id}{get_params()}'
+
+    return cache_key
+
+
 async def load_data(value, values, headers, _cache, _parent_span: Span):
     with _parent_span.start_child(op='load_data', description=value) as _span:
-        try:
-            rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
-            values['$rel'] = '/'.join(rel_path)
-            _response, related = await _load_related_data(rel_path, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=_span)
+        rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
+        cache_key = get_cache_key(rel_path, curr_obj=values, **values)
+        values['$rel'] = '/'.join(rel_path)
 
-            if not _response.ok:
-                raise ValueError({
-                    'status': _response.status,
-                    'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
-                })
+        with _span.start_child(op='load_data.redis_get', description=cache_key):
+            data = await redis.get(cache_key)
 
-        except Exception as error:
-            _logger.exception(error)
-            values['$error'] = error.args[0]
+        if not data:
+            data = {}
+            try:
+                _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=_span)
+
+                if not _response.ok:
+                    raise ValueError({
+                        'status': _response.status,
+                        'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
+                    })
+
+            except Exception as error:
+                _logger.exception(error)
+                data['$error'] = error.args[0]
+
+            else:
+                data.update(related)
+
+            with _span.start_child(op='load_data.redis_set'):
+                await redis.set(cache_key, json.dumps(data), ex=timedelta(seconds=60))
 
         else:
-            values.update(related)
+            data = json.loads(data)
+
+        values.update(data)
 
 
 async def load_referenced_data(values: dict, headers: dict = {}, parent: Optional[dict] = None, max_level: Optional[int] = None, _cache: Optional[dict] = None, _parent_span: Optional[Span] = None):
@@ -188,7 +214,7 @@ async def proxy(method, service, path, headers, params, data=None, _cache: Optio
             data=data,
         ) as response:
             if 'application/json' in response.content_type:
-                data = await response.json()
+                data = await response.json(loads=json.loads)
                 if path != 'openapi.json':
                     await load_referenced_data(data, headers=headers, _cache=_cache, _parent_span=_span)
 

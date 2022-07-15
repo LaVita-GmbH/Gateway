@@ -3,3 +3,5 @@ aiohttp
 python-dotenv
 jsonpath-ng
 sentry-sdk
+redis
+orjson
