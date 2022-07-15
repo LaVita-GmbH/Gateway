@@ -1,19 +1,23 @@
 import functools
 import logging
+from pydoc import describe
 import re
+import asyncio
 from typing import Any, Optional, Tuple
 from urllib.parse import urlencode
 import aiohttp
 from aiohttp.client import ClientResponse
 from aiohttp.client_exceptions import InvalidURL
 from jsonpath_ng import parse as jsonpath_parse
+from sentry_sdk import start_span
+from sentry_sdk.tracing import Span
 from . import settings
 
 
 _logger = logging.getLogger(__name__)
 
 
-async def _load_related_data(relation: list[str], curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, **lookup):
+async def _load_related_data(relation: list[str], curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, *, _parent_span: Span, **lookup) -> asyncio.Task:
     if _cache is None:
         _cache = {}
 
@@ -27,25 +31,15 @@ async def _load_related_data(relation: list[str], curr_obj: dict, headers: dict 
     if id:
         cache_key += f'/{id}{get_params()}'
         if cache_key not in _cache:
-            try:
-                _response, data = await proxy(
-                    method='GET',
-                    service=relation[1],
-                    path='/'.join([*relation[2:], id]),
-                    params={},
-                    headers=headers,
-                )
-                if not _response.ok:
-                    raise ValueError({
-                        'status': _response.status,
-                        'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
-                    })
-
-                _cache[cache_key] = data
-
-            except Exception as error:
-                _logger.warn("Failed to load referenced data for $rel='%s' error: %r", relation, error, exc_info=True)
-                raise
+            _cache[cache_key] = asyncio.create_task(proxy(
+                method='GET',
+                service=relation[1],
+                path='/'.join([*relation[2:], id]),
+                params={},
+                headers=headers,
+                _cache=_cache,
+                _parent_span=_parent_span,
+            ))
 
     elif '$rel_params' in curr_obj:
         raise NotImplementedError
@@ -102,57 +96,80 @@ def resolve_placeholder(value, curr_obj):
     )
 
 
-async def load_referenced_data(values: dict, headers: dict = {}, parent: Optional[dict] = None, max_level: Optional[int] = None):
+async def load_data(value, values, headers, _cache, _parent_span: Span):
+    with _parent_span.start_child(op='load_data', description=value) as _span:
+        try:
+            rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
+            values['$rel'] = '/'.join(rel_path)
+            future = await _load_related_data(rel_path, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=_span)
+            _response, related = await future
+
+            if not _response.ok:
+                raise ValueError({
+                    'status': _response.status,
+                    'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
+                })
+
+        except Exception as error:
+            _logger.exception(error)
+            values['$error'] = error.args[0]
+
+        else:
+            values.update(related)
+
+
+async def load_referenced_data(values: dict, headers: dict = {}, parent: Optional[dict] = None, max_level: Optional[int] = None, _cache: Optional[dict] = None, _parent_span: Optional[Span] = None):
     """
     Load referenced data into `values`, performing an in-place update.
     """
 
-    _referenced_data_cache = {}
+    if _cache is None:
+        _cache = {}
 
-    async def enrich_data(values, parent: Optional[dict] = None, level: int = 0):
-        if isinstance(values, list):
-            for item in values:
-                await enrich_data(item, parent=parent, level=level + 1)
+    _pending = []
+    cleanup_callbacks = []
 
-        if not isinstance(values, dict):
-            return
+    async def enrich_data(values, parent: Optional[dict] = None, level: int = 0, _parent_span: Optional[Span] = None):
+        with (_parent_span.start_child if _parent_span else start_span)(op='enrich_data') as _span:
+            if isinstance(values, list):
+                for item in values:
+                    await enrich_data(item, parent=parent, level=level + 1)
 
-        if '$rel_at' in values:
-            return
+            if not isinstance(values, dict):
+                return
 
-        if max_level and level > max_level:
-            return
+            if '$rel_at' in values:
+                return
 
-        if parent:
-            values['_parent'] = parent
+            if max_level and level > max_level:
+                return
 
-        for key, value in list(values.items()):
-            if key == '_parent':
-                continue
+            if parent:
+                values['_parent'] = parent
 
-            if key == '$rel':
-                try:
-                    rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
-                    values['$rel'] = '/'.join(rel_path)
-                    related = await _load_related_data(rel_path, curr_obj=values, headers=headers, **values, _cache=_referenced_data_cache)
+            for key, value in list(values.items()):
+                if key == '_parent':
+                    continue
 
-                except Exception as error:
-                    _logger.exception(error)
-                    values['$error'] = error.args[0]
+                if key == '$rel':
+                    future = asyncio.create_task(load_data(value, values, headers, _cache, _parent_span=_span))
+                    _pending.append(future)
 
                 else:
-                    values.update(related)
+                    await enrich_data(value, parent=values, level=level + 1, _parent_span=_span)
 
-            else:
-                await enrich_data(value, parent=values, level=level + 1)
+            cleanup_callbacks.append(lambda: values.pop('_parent', None))
 
-        if parent:
-            del values['_parent']
+    with (_parent_span.start_child if _parent_span else start_span)(op='load_referenced_data') as _span:
+        await enrich_data(values, parent=parent, _parent_span=_span)
+        await asyncio.gather(*_pending, return_exceptions=True)
 
-    await enrich_data(values, parent=parent)
+    with (_parent_span.start_child if _parent_span else start_span)(op='load_referenced_data.cleanup'):
+        for callback in cleanup_callbacks:
+            callback()
 
 
-async def proxy(method, service, path, headers, params, data=None) -> Tuple[ClientResponse, Any]:
+async def proxy(method, service, path, headers, params, data=None, _cache: Optional[dict] = None, _parent_span: Optional[Span] = None) -> Tuple[ClientResponse, Any]:
     try:
         base_url = settings.SERVICE_URLS[service]
 
@@ -163,18 +180,19 @@ async def proxy(method, service, path, headers, params, data=None) -> Tuple[Clie
     if path in ('docs', 'redoc'):
         url = f"{base_url}/{path}"
 
-    async with aiohttp.request(
-        method,
-        url,
-        headers=headers,
-        params=params,
-        data=data,
-    ) as response:
-        if 'application/json' in response.content_type:
-            data = await response.json()
-            if path != 'openapi.json':
-                await load_referenced_data(data, headers=headers)
+    with (_parent_span.start_child if _parent_span else start_span)(op='proxy', description=f'{method} /{service}/{path}') as _span:
+        async with aiohttp.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            data=data,
+        ) as response:
+            if 'application/json' in response.content_type:
+                data = await response.json()
+                if path != 'openapi.json':
+                    await load_referenced_data(data, headers=headers, _cache=_cache, _parent_span=_span)
 
-            return response, data
+                return response, data
 
-        return response, await response.text()
+            return response, await response.text()

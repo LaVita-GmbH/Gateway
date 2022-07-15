@@ -4,17 +4,22 @@ from starlette.routing import Route
 from starlette.requests import Request
 from aiohttp.client_exceptions import ClientError, InvalidURL
 from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
+from sentry_sdk import Hub
 from . import settings
 from .resolver_proxy import proxy
 
 
 async def resolver(request: Request):
+    request_headers = {**request.headers}
+    if not request_headers.get('sentry-trace'):
+        request_headers['sentry-trace'] = Hub.current.scope.transaction.to_traceparent()
+
     try:
         response, data = await proxy(
             method=request.method,
             service=request.path_params['service'],
             path=request.path_params['path'],
-            headers=request.headers,
+            headers=request_headers,
             params=request.query_params,
             data=await request.body(),
         )
@@ -30,12 +35,12 @@ async def resolver(request: Request):
             status_code=502,
         )
 
-    headers = {**response.headers}
-    del headers['Content-Length']
+    response_headers = {**response.headers, 'x-flow-id': request_headers['sentry-trace']}
+    del response_headers['Content-Length']
     if 'application/json' in response.content_type:
-        return JSONResponse(data, headers=headers)
+        return JSONResponse(data, headers=response_headers)
 
-    return Response(data, headers=headers)
+    return Response(data, headers=response_headers)
 
 
 
