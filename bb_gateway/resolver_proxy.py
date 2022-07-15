@@ -17,7 +17,7 @@ from . import settings
 _logger = logging.getLogger(__name__)
 
 
-async def _load_related_data(relation: list[str], curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, *, _parent_span: Span, **lookup) -> asyncio.Task:
+def _load_related_data(relation: list[str], curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, *, _parent_span: Span, **lookup) -> asyncio.Task:
     if _cache is None:
         _cache = {}
 
@@ -101,8 +101,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
         try:
             rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
             values['$rel'] = '/'.join(rel_path)
-            future = await _load_related_data(rel_path, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=_span)
-            _response, related = await future
+            _response, related = await _load_related_data(rel_path, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=_span)
 
             if not _response.ok:
                 raise ValueError({
