@@ -13,7 +13,7 @@ from redis.exceptions import RedisClusterException, RedisError
 from aiohttp.client import ClientResponse
 from aiohttp.client_exceptions import InvalidURL
 from jsonpath_ng import parse as jsonpath_parse
-from sentry_sdk import start_span
+from sentry_sdk import start_span, set_tag
 from sentry_sdk.tracing import Span
 from . import settings
 
@@ -124,12 +124,14 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                 data = await redis_conn.get(cache_key)
 
             except RedisError as error:
+                data = None
                 _logger.exception(error)
 
         if not data:
             data = {}
             try:
-                _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=_span)
+                with _span.start_child(op='load_data.fetch') as __span:
+                    _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
 
                 if not _response.ok:
                     raise ValueError({
@@ -152,6 +154,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                     _logger.exception(error)
 
         else:
+            set_tag('cache', 'redis')
             data = json.loads(data)
 
         values.update(data)
