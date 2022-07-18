@@ -3,7 +3,7 @@ import functools
 import logging
 import re
 import asyncio
-from typing import Any, Optional, Tuple
+from typing import Any, Coroutine, Optional, Tuple
 from urllib.parse import urlencode
 import orjson as json
 import aiohttp
@@ -28,7 +28,17 @@ except RedisClusterException:
     redis_conn = Redis.from_url(settings.REDIS_URL)
 
 
-def _load_related_data(relation: list[str], cache_key: str, curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, *, _parent_span: Span, **lookup) -> asyncio.Task:
+def _load_related_data(
+    relation: list[str],
+    cache_key: str,
+    curr_obj: dict,
+    headers: dict = {},
+    id: Optional[str] = None,
+    _cache: Optional[dict] = None,
+    *,
+    _parent_span: Span,
+    **lookup,
+) -> asyncio.Task[Tuple[ClientResponse, Any]]:
     if _cache is None:
         _cache = {}
 
@@ -134,6 +144,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                     _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
 
                     _span.set_tag('data.source', 'upstream')
+                    _span.set_http_status(_response.status)
 
                 if not _response.ok:
                     raise ValueError({
