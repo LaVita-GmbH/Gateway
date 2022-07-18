@@ -133,6 +133,8 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                 with _span.start_child(op='load_data.fetch') as __span:
                     _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
 
+                    _span.set_tag('data.source', 'upstream')
+
                 if not _response.ok:
                     raise ValueError({
                         'status': _response.status,
@@ -154,7 +156,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                     _logger.exception(error)
 
         else:
-            set_tag('cache', 'redis')
+            _span.set_tag('data.source', 'redis')
             data = json.loads(data)
 
         values.update(data)
@@ -223,6 +225,7 @@ async def proxy(method, service, path, headers, params, data=None, _cache: Optio
         url = f"{base_url}/{path}"
 
     with (_parent_span.start_child if _parent_span else start_span)(op='proxy', description=f'{method} /{service}/{path}') as _span:
+        set_tag('service', service)
         async with aiohttp.request(
             method,
             url,
