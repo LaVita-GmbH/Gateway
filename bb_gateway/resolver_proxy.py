@@ -8,6 +8,8 @@ from urllib.parse import urlencode
 import orjson as json
 import aiohttp
 from redis.asyncio import Redis
+from redis.asyncio.cluster import RedisCluster
+from redis.exceptions import RedisClusterException, RedisError
 from aiohttp.client import ClientResponse
 from aiohttp.client_exceptions import InvalidURL
 from jsonpath_ng import parse as jsonpath_parse
@@ -19,7 +21,11 @@ from . import settings
 _logger = logging.getLogger(__name__)
 
 
-redis = Redis.from_url(settings.REDIS_URL)
+try:
+    redis_conn = RedisCluster.from_url(url=settings.REDIS_URL)
+
+except RedisClusterException:
+    redis_conn = Redis.from_url(settings.REDIS_URL)
 
 
 def _load_related_data(relation: list[str], cache_key: str, curr_obj: dict, headers: dict = {}, id: Optional[str] = None, _cache: Optional[dict] = None, *, _parent_span: Span, **lookup) -> asyncio.Task:
@@ -114,7 +120,11 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
         values['$rel'] = '/'.join(rel_path)
 
         with _span.start_child(op='load_data.redis_get', description=cache_key):
-            data = await redis.get(cache_key)
+            try:
+                data = await redis_conn.get(cache_key)
+
+            except RedisError as error:
+                _logger.exception(error)
 
         if not data:
             data = {}
@@ -135,7 +145,11 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                 data.update(related)
 
             with _span.start_child(op='load_data.redis_set'):
-                await redis.set(cache_key, json.dumps(data), ex=timedelta(seconds=60))
+                try:
+                    await redis_conn.set(cache_key, json.dumps(data), ex=timedelta(seconds=60))
+
+                except RedisError as error:
+                    _logger.exception(error)
 
         else:
             data = json.loads(data)
