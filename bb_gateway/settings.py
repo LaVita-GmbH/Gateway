@@ -1,6 +1,9 @@
 import os
 import sentry_sdk
 from dotenv import load_dotenv
+from redis.asyncio import Redis
+from redis.asyncio.cluster import RedisCluster
+from redis.exceptions import RedisClusterException
 
 
 load_dotenv()
@@ -10,7 +13,13 @@ ENV_SERVICE_PREFIX = 'SERVICE_'
 SERVICE_URLS = {key.removeprefix(ENV_SERVICE_PREFIX).lower().replace('_', '-'): value for key, value in os.environ.items() if key.startswith(ENV_SERVICE_PREFIX)}
 SENTRY_TRACES_SAMPLE_RATE = float(os.getenv('SENTRY_TRACES_SAMPLE_RATE', 1.0))
 
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+REDIS_DEFAULT = 'redis://localhost:6379/0'
+REDIS_URL = os.getenv('REDIS_URL', REDIS_DEFAULT)
+if REDIS_URL != REDIS_DEFAULT or os.getenv('REDIS_CLUSTER'):
+    REDIS_CONN = RedisCluster.from_url(url=REDIS_URL)
+
+else:
+    REDIS_CONN = Redis.from_url(REDIS_URL)
 
 
 def sentry_traces_sampler(context):
