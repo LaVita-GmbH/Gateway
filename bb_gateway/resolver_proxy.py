@@ -159,12 +159,15 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
             else:
                 data.update(related)
 
-            with _span.start_child(op='load_data.redis_set'):
-                try:
-                    await redis_conn.set(cache_key, json.dumps(data), ex=timedelta(seconds=60))
+            _span.set_tag('cache_control', _response.headers.get('cache-control'))
 
-                except RedisError as error:
-                    _logger.exception(error)
+            if _response.headers.get('cache-control') != 'no-cache':
+                with _span.start_child(op='load_data.redis_set'):
+                    try:
+                        await redis_conn.set(cache_key, json.dumps(data), ex=timedelta(seconds=60))
+
+                    except RedisError as error:
+                        _logger.exception(error)
 
         else:
             _span.set_tag('data.source', 'redis')
