@@ -39,9 +39,9 @@ async def resolver(request: Request):
     response_headers = {**response.headers}
     del response_headers['Content-Length']
     if 'application/json' in response.content_type:
-        return Response(json.dumps(data), headers=response_headers)
+        return Response(json.dumps(data), headers=response_headers, status_code=response.status)
 
-    return Response(data, headers=response_headers)
+    return Response(data, headers=response_headers, status_code=response.status)
 
 
 
