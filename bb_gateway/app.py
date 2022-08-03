@@ -21,7 +21,7 @@ async def resolver(request: Request):
             service=request.path_params['service'],
             path=request.path_params['path'],
             headers=request_headers,
-            params=request.query_params,
+            params=str(request.query_params),
             data=await request.body(),
         )
 
