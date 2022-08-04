@@ -37,7 +37,12 @@ async def resolver(request: Request):
         )
 
     response_headers = {**response.headers}
-    del response_headers['Content-Length']
+    try:
+        del response_headers['Content-Length']
+
+    except KeyError:
+        pass
+
     if 'application/json' in response.content_type:
         return Response(json.dumps(data), headers=response_headers, status_code=response.status)
 
