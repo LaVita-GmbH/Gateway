@@ -1,3 +1,4 @@
+import os
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -10,15 +11,20 @@ from . import settings
 from .resolver_proxy import proxy
 
 
+DO_ADD_CORS_HEADERS = os.getenv('DO_ADD_CORS_HEADERS')
+
+
 async def resolver(request: Request):
     request_headers = {**request.headers}
 
-    cors_headers = {
-        'Access-Control-Allow-Origin': request_headers.get('origin'),
-        'Access-Control-Allow-Credentials': 'true',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type, sentry-trace',
-        'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
-    }
+    cors_headers = {}
+    if request_headers.get('origin') and DO_ADD_CORS_HEADERS:
+        cors_headers = {
+            'Access-Control-Allow-Origin': request_headers.get('origin'),
+            'Access-Control-Allow-Credentials': 'true',
+            'Access-Control-Allow-Headers': 'Authorization, Content-Type, sentry-trace',
+            'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
+        }
 
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=cors_headers)
