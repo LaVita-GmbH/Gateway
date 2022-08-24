@@ -12,6 +12,17 @@ from .resolver_proxy import proxy
 
 async def resolver(request: Request):
     request_headers = {**request.headers}
+
+    cors_headers = {
+        'Access-Control-Allow-Origin': request_headers.get('origin'),
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, sentry-trace',
+        'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
+    }
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=cors_headers)
+
     if not request_headers.get('sentry-trace'):
         request_headers['sentry-trace'] = Hub.current.scope.transaction.to_traceparent()
 
@@ -34,9 +45,10 @@ async def resolver(request: Request):
                 'error': error.__class__.__name__,
             },
             status_code=502,
+            headers=cors_headers,
         )
 
-    response_headers = {**response.headers}
+    response_headers = {**response.headers, **cors_headers}
     try:
         del response_headers['Content-Length']
 
