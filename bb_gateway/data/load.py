@@ -25,7 +25,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                 data = await settings.REDIS_CONN.get(cache_key)
 
             except Exception as error:
-                _logger.exception(error)
+                _logger.warning("Redis get error: %r", error)
 
         if not data:
             data = {}
@@ -43,7 +43,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                     })
 
             except Exception as error:
-                _logger.exception(error)
+                _logger.warning("Cannot load data from %s", value)
                 data['$error'] = error.args[0]
 
             else:
@@ -57,7 +57,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                         await settings.REDIS_CONN.set(cache_key, json.dumps(data), ex=timedelta(seconds=60))
 
                     except Exception as error:
-                        _logger.exception(error)
+                        _logger.warning("Redis set error: %r", error)
 
         else:
             _span.set_tag('data.source', 'redis')
