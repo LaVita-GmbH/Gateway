@@ -74,8 +74,7 @@ async def healthcheck(request: Request):
     }), headers={'Content-Type': 'application/json'})
 
 
-star = Starlette(routes=[
+app = Starlette(routes=[
     Route('/{service:str}/{path:path}', resolver, methods=['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'HEAD', 'OPTIONS']),
     Route('/', healthcheck)
 ])
-app = SentryAsgiMiddleware(star, transaction_style='url')
