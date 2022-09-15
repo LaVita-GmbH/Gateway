@@ -14,7 +14,7 @@ _logger = logging.getLogger(__name__)
 
 
 async def proxy(method: str, service: str, path: str, headers, params: str, data=None, timeout: Optional[float] = None, _cache: Optional[dict] = None, _parent_span: Optional[Span] = None) -> Tuple[ClientResponse, Any]:
-    _logger.info("PROXY %s %s/%s", method, service, path)
+    _logger.debug("PROXY %s %s/%s", method, service, path)
     try:
         base_url = settings.SERVICE_URLS[service]
 
