@@ -1,6 +1,6 @@
 import logging
 from typing import Any, Optional, Tuple
-import orjson as json
+import json
 import aiohttp
 from aiohttp.client import ClientResponse
 from aiohttp.client_exceptions import InvalidURL
@@ -13,7 +13,8 @@ from .data.analyze import analyze_data
 _logger = logging.getLogger(__name__)
 
 
-async def proxy(method, service, path, headers, params, data=None, _cache: Optional[dict] = None, _parent_span: Optional[Span] = None) -> Tuple[ClientResponse, Any]:
+async def proxy(method: str, service: str, path: str, headers, params: str, data=None, timeout: Optional[float] = None, _cache: Optional[dict] = None, _parent_span: Optional[Span] = None) -> Tuple[ClientResponse, Any]:
+    _logger.info("PROXY %s %s/%s", method, service, path)
     try:
         base_url = settings.SERVICE_URLS[service]
 
@@ -26,15 +27,19 @@ async def proxy(method, service, path, headers, params, data=None, _cache: Optio
 
     with (_parent_span.start_child if _parent_span else start_span)(op='proxy', description=f'{method} /{service}/{path}') as _span:
         set_tag('service', service)
+        _logger.debug("REQ %s %s/%s", method, service, path)
         async with aiohttp.request(
             method,
             url,
             headers=headers,
             params=params,
             data=data,
+            timeout=aiohttp.ClientTimeout(total=timeout),
         ) as response:
+            _logger.debug("REQ %s %s/%s resolved in with %i", method, service, path, response.status)
             if 'application/json' in response.content_type:
                 data = await response.json(loads=json.loads)
+                _logger.debug("DATA %s %s/%s\n%s", method, service, path, json.dumps(data, indent=4))
                 if path != 'openapi.json':
                     await analyze_data(data, headers=headers, _cache=_cache, _parent_span=_span)
 

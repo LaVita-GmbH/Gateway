@@ -19,6 +19,7 @@
                 "--reload"
             ],
             "env": {
+                // "PYTHONASYNCIODEBUG": "1",
                 "DEBUG": "true",
                 "SENTRY_DSN": "https://793d19a55e004ad3b7a4b653f088c470@sentry.lavita.io/32",
             },

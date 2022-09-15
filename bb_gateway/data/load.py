@@ -22,7 +22,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
 
         with _span.start_child(op='load_data.redis_get', description=cache_key):
             try:
-                data = await settings.REDIS_CONN.get(cache_key)
+                data = await asyncio.wait_for(settings.REDIS_CONN.get(cache_key), timeout=0.1)
 
             except Exception as error:
                 _logger.warning("Redis get error: %r", error)
@@ -31,7 +31,14 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
             data = {}
             try:
                 with _span.start_child(op='load_data.fetch') as __span:
-                    _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
+                    try:
+                        _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
+
+                    except asyncio.TimeoutError as error:
+                        _logger.warning("Timeout loading related data on %s", value)
+                        raise ValueError({
+                            'status': 504,
+                        })
 
                     _span.set_tag('data.source', 'upstream')
                     _span.set_http_status(_response.status)
@@ -49,15 +56,15 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
             else:
                 data.update(related)
 
-            _span.set_tag('cache_control', _response.headers.get('cache-control'))
+                _span.set_tag('cache_control', _response.headers.get('cache-control'))
 
-            if _response.headers.get('cache-control') != 'no-cache':
-                with _span.start_child(op='load_data.redis_set'):
-                    try:
-                        await settings.REDIS_CONN.set(cache_key, json.dumps(data), ex=timedelta(seconds=60))
+                if _response.headers.get('cache-control') != 'no-cache':
+                    with _span.start_child(op='load_data.redis_set'):
+                        try:
+                            await asyncio.wait_for(settings.REDIS_CONN.set(cache_key, json.dumps(data), ex=timedelta(seconds=60)), timeout=0.25)
 
-                    except Exception as error:
-                        _logger.warning("Redis set error: %r", error)
+                        except Exception as error:
+                            _logger.warning("Redis set error: %r", error)
 
         else:
             _span.set_tag('data.source', 'redis')
@@ -83,17 +90,27 @@ def _load_related_data(
 
     from ..resolver_proxy import proxy
 
+    try:
+        del headers['content-length']
+
+    except KeyError:
+        pass
+
     if id:
         if cache_key not in _cache:
-            _cache[cache_key] = asyncio.create_task(proxy(
+            _cache[cache_key] = (proxy(
                 method='GET',
                 service=relation[1],
                 path='/'.join([*relation[2:], id]),
-                params={},
+                params='',
                 headers=headers,
+                timeout=3.0,
                 _cache=_cache,
                 _parent_span=_parent_span,
             ))
+
+        else:
+            _logger.debug("Request already in cache. cache_key=%s", cache_key)
 
     elif '$rel_params' in curr_obj:
         raise NotImplementedError

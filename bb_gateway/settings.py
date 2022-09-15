@@ -1,4 +1,5 @@
 import os
+import logging.config
 import sentry_sdk
 from dotenv import load_dotenv
 from redis.asyncio import Redis
@@ -7,6 +8,28 @@ from redis.exceptions import RedisClusterException
 
 
 load_dotenv()
+
+
+logging.config.dictConfig({
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': os.getenv('LOGLEVEL', 'INFO'),
+    },
+})
 
 
 ENV_SERVICE_PREFIX = 'SERVICE_'

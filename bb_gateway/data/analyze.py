@@ -1,6 +1,5 @@
-import logging
 import asyncio
-from typing import Optional
+from typing import Coroutine, Iterable, Optional
 from sentry_sdk import start_span
 from sentry_sdk.tracing import Span
 from .load import load_data
@@ -16,7 +15,7 @@ async def analyze_data(values: dict, headers: dict = {}, parent: Optional[dict] 
 
     cleanup_callbacks = []
 
-    def enrich_data(values, parent: Optional[dict] = None, *, level: int = 0, _parent_span: Span):
+    def enrich_data(values, parent: Optional[dict] = None, *, level: int = 0, _parent_span: Span) -> Iterable[Coroutine]:
         with _parent_span.start_child(op='enrich_data') as _span:
             if isinstance(values, list):
                 for item in values:
@@ -38,7 +37,7 @@ async def analyze_data(values: dict, headers: dict = {}, parent: Optional[dict] 
 
             def process_value(key, value):
                 if key == '$rel':
-                    yield asyncio.create_task(load_data(value, values, headers, _cache, _parent_span=_span))
+                    yield load_data(value, values, headers, _cache, _parent_span=_span)
 
                 else:
                     yield from enrich_data(value, parent=values, level=level + 1, _parent_span=_span)
@@ -48,7 +47,7 @@ async def analyze_data(values: dict, headers: dict = {}, parent: Optional[dict] 
 
     with (_parent_span.start_child if _parent_span else start_span)(op='load_referenced_data') as _span:
         _tasks = list(enrich_data(values, parent=parent, _parent_span=_span))
-        results = await asyncio.gather(*_tasks, return_exceptions=True)
+        await asyncio.gather(*_tasks, return_exceptions=True)
 
     with (_parent_span.start_child if _parent_span else start_span)(op='load_referenced_data.cleanup'):
         for callback in cleanup_callbacks:
