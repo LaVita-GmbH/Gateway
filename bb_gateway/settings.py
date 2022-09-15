@@ -4,7 +4,6 @@ import sentry_sdk
 from dotenv import load_dotenv
 from redis.asyncio import Redis
 from redis.asyncio.cluster import RedisCluster
-from redis.exceptions import RedisClusterException
 
 
 load_dotenv()

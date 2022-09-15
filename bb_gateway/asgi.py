@@ -4,8 +4,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.requests import Request
 from aiohttp.client_exceptions import ClientError, InvalidURL
-from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
-from sentry_sdk import Hub
+from sentry_sdk import Hub, configure_scope
 import orjson as json
 from . import settings
 from .resolver_proxy import proxy
@@ -15,6 +14,13 @@ DO_ADD_CORS_HEADERS = os.getenv('DO_ADD_CORS_HEADERS')
 
 
 async def resolver(request: Request):
+    def _sentry_processor(event, hint):
+        path = request.path_params['path'].split('/')
+        event['transaction'] = f'{request.method} /{request.path_params["service"]}/{path[0]}{"/..." if len(path) > 1 else ""}'
+        return event
+
+    Hub.current.scope.add_event_processor(_sentry_processor)
+
     request_headers = {**request.headers}
 
     cors_headers = {}

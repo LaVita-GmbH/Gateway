@@ -7,4 +7,4 @@ WORKDIR /app
 RUN pip install uvicorn
 RUN pip install -r requirements.txt
 
-CMD ["uvicorn", "asgi:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uvicorn", "bb_gateway.asgi:app", "--host", "0.0.0.0", "--port", "5000"]
