@@ -25,6 +25,8 @@ async def proxy(method: str, service: str, path: str, headers, params: str, data
     if path in ('docs', 'redoc'):
         url = f"{base_url}/{path}"
 
+    is_json = False
+
     with (_parent_span.start_child if _parent_span else start_span)(op='proxy', description=f'{method} /{service}/{path}') as _span:
         set_tag('service', service)
         _logger.debug("REQ %s %s/%s", method, service, path)
@@ -38,11 +40,14 @@ async def proxy(method: str, service: str, path: str, headers, params: str, data
         ) as response:
             _logger.debug("REQ %s %s/%s resolved in with %i", method, service, path, response.status)
             if 'application/json' in response.content_type:
+                is_json = True
                 data = await response.json(loads=json.loads)
-                _logger.debug("DATA %s %s/%s\n%s", method, service, path, json.dumps(data, indent=4))
-                if path != 'openapi.json':
-                    await analyze_data(data, headers=headers, _cache=_cache, _parent_span=_span)
 
-                return response, data
+            else:
+                data = await response.text()
 
-            return response, await response.text()
+    with (_parent_span.start_child if _parent_span else start_span)(op='analyze_data', description=f'{method} /{service}/{path}') as _span:
+        if is_json and path != 'openapi.json':
+            await analyze_data(data, headers=headers, _cache=_cache, _parent_span=_span)
+
+        return response, data

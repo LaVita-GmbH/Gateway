@@ -3,7 +3,7 @@ import logging
 import asyncio
 from typing import Any, Optional, Tuple
 import orjson as json
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, TimeoutError as RedisTimeoutError
 from aiohttp.client import ClientResponse
 from sentry_sdk.tracing import Span
 from .. import settings
@@ -11,6 +11,18 @@ from .utils import resolve_placeholder, get_cache_key
 
 
 _logger = logging.getLogger(__name__)
+
+
+async def cache_write(cache_key, data, _span):
+    with _span.start_child(op='load_data.redis_set'):
+        try:
+            await asyncio.wait_for(settings.REDIS_CONN.set(cache_key, json.dumps(data), ex=timedelta(seconds=60)), timeout=settings.REDIS_TIMEOUT_SET)
+
+        except RedisTimeoutError:
+            _logger.warning("CACHE TIMEOUT %s", cache_key)
+
+        except Exception as error:
+            _logger.error("CACHE ERR %s %r", cache_key, error)
 
 
 async def load_data(value, values, headers, _cache, _parent_span: Span):
@@ -22,10 +34,20 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
 
         with _span.start_child(op='load_data.redis_get', description=cache_key):
             try:
-                data = await asyncio.wait_for(settings.REDIS_CONN.get(cache_key), timeout=0.1)
+                data = await asyncio.wait_for(settings.REDIS_CONN.get(cache_key), timeout=settings.REDIS_TIMEOUT_GET)
+
+            except RedisTimeoutError:
+                _logger.warning("CACHE TIMEOUT %s", cache_key)
 
             except Exception as error:
-                _logger.warning("Redis get error: %r", error)
+                _logger.error("CACHE ERR %s %r", cache_key, error)
+
+            else:
+                if data:
+                    _logger.debug("CACHE HIT %s", cache_key)
+
+                else:
+                    _logger.debug("CACHE MISS %s", cache_key)
 
         if not data:
             data = {}
@@ -59,12 +81,7 @@ async def load_data(value, values, headers, _cache, _parent_span: Span):
                 _span.set_tag('cache_control', _response.headers.get('cache-control'))
 
                 if _response.headers.get('cache-control') != 'no-cache':
-                    with _span.start_child(op='load_data.redis_set'):
-                        try:
-                            await asyncio.wait_for(settings.REDIS_CONN.set(cache_key, json.dumps(data), ex=timedelta(seconds=60)), timeout=0.25)
-
-                        except Exception as error:
-                            _logger.warning("Redis set error: %r", error)
+                    asyncio.create_task(cache_write(cache_key, data, _span))
 
         else:
             _span.set_tag('data.source', 'redis')

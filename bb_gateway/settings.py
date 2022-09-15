@@ -36,6 +36,8 @@ ENV_SERVICE_PREFIX = 'SERVICE_'
 SERVICE_URLS = {key.removeprefix(ENV_SERVICE_PREFIX).lower().replace('_', '-'): value for key, value in os.environ.items() if key.startswith(ENV_SERVICE_PREFIX)}
 SENTRY_TRACES_SAMPLE_RATE = float(os.getenv('SENTRY_TRACES_SAMPLE_RATE', 1.0))
 
+REDIS_TIMEOUT_GET = int(os.getenv('REDIS_TIMEOUT_GET', 15)) / 1000
+REDIS_TIMEOUT_SET = int(os.getenv('REDIS_TIMEOUT_SET', 50)) / 1000
 REDIS_CONNECT_TIMEOUT = int(os.getenv('REDIS_CONNECT_TIMEOUT', 10000)) / 1000
 REDIS_DEFAULT = 'redis://localhost:6379/0'
 REDIS_URL = os.getenv('REDIS_URL', REDIS_DEFAULT)
