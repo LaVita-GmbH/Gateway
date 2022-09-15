@@ -4,7 +4,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.requests import Request
 from aiohttp.client_exceptions import ClientError, InvalidURL
-from sentry_sdk import Hub, configure_scope
+from sentry_sdk import Hub
 import orjson as json
 from . import settings
 from .resolver_proxy import proxy

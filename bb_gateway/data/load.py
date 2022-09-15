@@ -115,7 +115,7 @@ def _load_related_data(
 
     if id:
         if cache_key not in _cache:
-            _cache[cache_key] = (proxy(
+            _cache[cache_key] = asyncio.create_task(proxy(
                 method='GET',
                 service=relation[1],
                 path='/'.join([*relation[2:], id]),
