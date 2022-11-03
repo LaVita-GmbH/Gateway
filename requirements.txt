@@ -2,6 +2,6 @@ starlette
 aiohttp
 python-dotenv
 jsonpath-ng
-sentry-sdk
+sentry-sdk==1.9.10
 redis
 orjson
