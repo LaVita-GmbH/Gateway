@@ -1,5 +1,5 @@
 import os
-from starlette.applications import Starlette
+from fastapi import FastAPI
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.requests import Request
@@ -80,7 +80,32 @@ async def healthcheck(request: Request):
     }), headers={'Content-Type': 'application/json'})
 
 
-app = Starlette(routes=[
+async def openapi(request: Request):
+    paths = {}
+    components = {
+        'schemas': {},
+        'securitySchemes': {},
+    }
+
+    for service in settings.SERVICE_URLS.keys():
+        _, data = await proxy('GET', service, 'openapi.json', headers={}, params={})
+        paths.update(data['paths'])
+        components['schemas'].update(data['components']['schemas'])
+        components['securitySchemes'].update(data['components']['securitySchemes'])
+
+    return Response(json.dumps({
+        'openapi': '3.0.2',
+        'info': {
+            'title': 'BizBerry',
+            'version': '0.1.0',
+        },
+        'paths': paths,
+        'components': components,
+    }), headers={'Content-Type': 'application/json'})
+
+
+app = FastAPI(routes=[
     Route('/{service:str}/{path:path}', resolver, methods=['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'HEAD', 'OPTIONS']),
-    Route('/', healthcheck)
+    Route('/', healthcheck),
+    Route('/openapi.json', openapi),
 ])

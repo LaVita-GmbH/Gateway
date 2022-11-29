@@ -5,3 +5,4 @@ jsonpath-ng
 sentry-sdk==1.9.10
 redis
 orjson
+fastapi==0.65.3
