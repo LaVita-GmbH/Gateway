@@ -80,6 +80,23 @@ async def healthcheck(request: Request):
     }), headers={'Content-Type': 'application/json'})
 
 
+def replace_ref(config, service):
+    if not isinstance(config, dict):
+        return config
+
+    for key, value in config.items():
+        if key == '$ref':
+            value: str
+            ref = value.split('/')
+            ref[-1] = f'{service}__{ref[-1]}'
+            config[key] = '/'.join(ref)
+
+        else:
+            replace_ref(value, service)
+
+    return config
+
+
 async def openapi(request: Request):
     paths = {}
     components = {
@@ -89,9 +106,21 @@ async def openapi(request: Request):
 
     for service in settings.SERVICE_URLS.keys():
         _, data = await proxy('GET', service, 'openapi.json', headers={}, params={})
-        paths.update(data['paths'])
-        components['schemas'].update(data['components']['schemas'])
-        components['securitySchemes'].update(data['components']['securitySchemes'])
+        for path, config in data.get('paths', {}).items():
+            if path == '/':
+                continue
+
+            if path in paths:
+                print(f'path {path} already exists')
+                continue
+
+            paths[path] = replace_ref(config, service)
+
+        for schema, config in data.get('components', {}).get('schemas', {}).items():
+            components['schemas'][f'{service}__{schema}'] = replace_ref(config, service)
+
+        for securitySchema, config in data.get('components', {}).get('securitySchemes', {}).items():
+            components['securitySchemes'][f'{service}__{securitySchema}'] = replace_ref(config, service)
 
     return Response(json.dumps({
         'openapi': '3.0.2',
