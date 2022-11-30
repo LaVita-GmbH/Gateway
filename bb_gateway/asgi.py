@@ -116,6 +116,12 @@ async def openapi(request: Request):
                 print(f'path {path} already exists')
                 continue
 
+            for method, method_config in config.items():
+                if 'tags' not in method_config:
+                    continue
+
+                method_config['tags'] = [f'{service}-{tag}' for tag in method_config['tags']]
+
             paths[path] = replace_ref(config, service)
 
         for schema, config in data.get('components', {}).get('schemas', {}).items():
