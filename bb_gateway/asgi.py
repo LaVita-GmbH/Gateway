@@ -81,20 +81,21 @@ async def healthcheck(request: Request):
 
 
 def replace_ref(config, service):
-    if not isinstance(config, dict):
-        return config
+    if isinstance(config, dict):
+        for key, value in config.items():
+            if key == '$ref':
+                value: str
+                ref = value.split('/')
+                if ref[-2] == 'schemas':
+                    ref[-1] = f'{service}__{ref[-1]}'
 
-    for key, value in config.items():
-        if key == '$ref':
-            value: str
-            ref = value.split('/')
-            if ref[-2] == 'schemas':
-                ref[-1] = f'{service}__{ref[-1]}'
+                config[key] = '/'.join(ref)
 
-            config[key] = '/'.join(ref)
+            else:
+                replace_ref(value, service)
 
-        else:
-            replace_ref(value, service)
+    if isinstance(config, list):
+        return [replace_ref(c) for c in config]
 
     return config
 
