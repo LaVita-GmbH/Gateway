@@ -88,7 +88,9 @@ def replace_ref(config, service):
         if key == '$ref':
             value: str
             ref = value.split('/')
-            ref[-1] = f'{service}__{ref[-1]}'
+            if ref[-2] == 'schemas':
+                ref[-1] = f'{service}__{ref[-1]}'
+
             config[key] = '/'.join(ref)
 
         else:
@@ -120,7 +122,7 @@ async def openapi(request: Request):
             components['schemas'][f'{service}__{schema}'] = replace_ref(config, service)
 
         for securitySchema, config in data.get('components', {}).get('securitySchemes', {}).items():
-            components['securitySchemes'][f'{service}__{securitySchema}'] = replace_ref(config, service)
+            components['securitySchemes'][securitySchema] = replace_ref(config, service)
 
     return Response(json.dumps({
         'openapi': '3.0.2',
