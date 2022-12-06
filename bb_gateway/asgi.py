@@ -95,7 +95,7 @@ def replace_ref(config, service):
                 replace_ref(value, service)
 
     if isinstance(config, list):
-        return [replace_ref(c) for c in config]
+        return [replace_ref(c, service) for c in config]
 
     return config
 

@@ -44,7 +44,7 @@ async def proxy(method: str, service: str, path: str, headers, params: str, data
                 data = await response.json(loads=json.loads)
 
             else:
-                data = await response.text()
+                data = await response.read()
 
     with (_parent_span.start_child if _parent_span else start_span)(op='analyze_data', description=f'{method} /{service}/{path}') as _span:
         if is_json and path != 'openapi.json':
