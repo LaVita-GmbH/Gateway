@@ -25,70 +25,82 @@ async def cache_write(cache_key, data, _span):
             _logger.error("CACHE ERR %s %r", cache_key, error)
 
 
-async def load_data(value, values, headers, _cache, _parent_span: Span):
-    with _parent_span.start_child(op='load_data', description=value) as _span:
-        rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
-        cache_key = get_cache_key(rel_path, curr_obj=values, **values)
-        values['$rel'] = '/'.join(rel_path)
-        data = {}
+def load_data(value, values, headers, _cache, _parent_span: Span):
+    rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
+    cache_key = get_cache_key(rel_path, curr_obj=values, **values)
 
-        with _span.start_child(op='load_data.redis_get', description=cache_key):
-            try:
-                data = await asyncio.wait_for(settings.REDIS_CONN.get(cache_key), timeout=settings.REDIS_TIMEOUT_GET)
+    async def _load():
+        with _parent_span.start_child(op='load_data', description=value) as _span:
+            values['$rel'] = '/'.join(rel_path)
+            data = {}
 
-            except RedisTimeoutError:
-                _logger.warning("CACHE TIMEOUT %s", cache_key)
+            with _span.start_child(op='load_data.redis_get', description=cache_key):
+                try:
+                    data = await asyncio.wait_for(settings.REDIS_CONN.get(cache_key), timeout=settings.REDIS_TIMEOUT_GET)
 
-            except Exception as error:
-                _logger.error("CACHE ERR %s %r", cache_key, error)
+                except RedisTimeoutError:
+                    _logger.warning("CACHE TIMEOUT %s", cache_key)
 
-            else:
-                if data:
-                    _logger.debug("CACHE HIT %s", cache_key)
+                except Exception as error:
+                    _logger.error("CACHE ERR %s %r", cache_key, error)
 
                 else:
-                    _logger.debug("CACHE MISS %s", cache_key)
+                    if data:
+                        _logger.debug("CACHE HIT %s", cache_key)
 
-        if not data:
-            data = {}
-            try:
-                with _span.start_child(op='load_data.fetch') as __span:
-                    try:
-                        _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
+                    else:
+                        _logger.debug("CACHE MISS %s", cache_key)
 
-                    except asyncio.TimeoutError as error:
-                        _logger.warning("Timeout loading related data on %s", value)
+            if not data:
+                data = {}
+                try:
+                    with _span.start_child(op='load_data.fetch') as __span:
+                        try:
+                            _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
+
+                        except asyncio.TimeoutError as error:
+                            _logger.warning("Timeout loading related data on %s", value)
+                            raise ValueError({
+                                'status': 504,
+                            })
+
+                        _span.set_tag('data.source', 'upstream')
+                        _span.set_http_status(_response.status)
+
+                    if not _response.ok:
                         raise ValueError({
-                            'status': 504,
+                            'status': _response.status,
+                            'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
                         })
 
-                    _span.set_tag('data.source', 'upstream')
-                    _span.set_http_status(_response.status)
+                except Exception as error:
+                    _logger.warning("Cannot load data from %s", value)
+                    data['$error'] = error.args[0]
 
-                if not _response.ok:
-                    raise ValueError({
-                        'status': _response.status,
-                        'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
-                    })
+                else:
+                    data.update(related)
 
-            except Exception as error:
-                _logger.warning("Cannot load data from %s", value)
-                data['$error'] = error.args[0]
+                    _span.set_tag('cache_control', _response.headers.get('cache-control'))
+
+                    if _response.headers.get('cache-control') != 'no-cache':
+                        asyncio.create_task(cache_write(cache_key, data, _span))
 
             else:
-                data.update(related)
+                _span.set_tag('data.source', 'redis')
+                data = json.loads(data)
 
-                _span.set_tag('cache_control', _response.headers.get('cache-control'))
+            values.update(data)
+            return values
 
-                if _response.headers.get('cache-control') != 'no-cache':
-                    asyncio.create_task(cache_write(cache_key, data, _span))
+    _cache_key = f'_load_{cache_key}'
+    if _cache_key not in _cache:
+        _logger.debug("LOAD_DATA FRESH %s", cache_key)
+        _cache[_cache_key] = asyncio.create_task(_load())
 
-        else:
-            _span.set_tag('data.source', 'redis')
-            data = json.loads(data)
+    else:
+        _logger.debug("LOAD_DATA PENDING %s", cache_key)
 
-        values.update(data)
-        return values
+    return _cache[_cache_key]
 
 
 def _load_related_data(
