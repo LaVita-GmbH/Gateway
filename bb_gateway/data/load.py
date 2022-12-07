@@ -92,13 +92,21 @@ def load_data(value, values: dict, headers, _cache, _parent_span: Span):
                 data = json.loads(data)
 
             if 'id' in values and 'id' in data and values['id'] != data['id']:
-                raise ValueError({
+                _logger.error("UPDATE MISMATCH", stack_info=True)
+
+                _span.set_data('value', value)
+                _span.set_data('cache_key', cache_key)
+                _span.set_data('rel_path', rel_path)
+
+                values['$error'] = {
                     'error': 'update_mismatch',
                     'data': data,
                     'values': values,
-                })
+                }
 
-            values.update(data)
+            else:
+                values.update(data)
+
             return values
 
     _cache_key = f'_load_{cache_key}'
