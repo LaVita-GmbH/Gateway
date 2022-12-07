@@ -27,7 +27,7 @@ async def cache_write(cache_key, data, _span):
             _logger.error("CACHE ERR %s %r", cache_key, error)
 
 
-def load_data(value, values, headers, _cache, _parent_span: Span):
+def load_data(value, values: dict, headers, _cache, _parent_span: Span):
     rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
     cache_key = get_cache_key(rel_path, curr_obj=values, **values)
 
@@ -90,6 +90,13 @@ def load_data(value, values, headers, _cache, _parent_span: Span):
             else:
                 _span.set_tag('data.source', 'redis')
                 data = json.loads(data)
+
+            if 'id' in values and 'id' in data and values['id'] != data['id']:
+                raise ValueError({
+                    'error': 'update_mismatch',
+                    'data': data,
+                    'values': values,
+                })
 
             values.update(data)
             return values
