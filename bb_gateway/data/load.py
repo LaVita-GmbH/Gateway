@@ -48,7 +48,7 @@ def load_data(value, values, headers, _cache, _parent_span: Span):
 
                 else:
                     if data:
-                        _logger.debug("CACHE HIT %s", cache_key)
+                        _logger.debug("CACHE HIT %s %s", cache_key, data)
 
                     else:
                         _logger.debug("CACHE MISS %s", cache_key)
