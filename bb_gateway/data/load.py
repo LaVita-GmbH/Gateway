@@ -16,7 +16,9 @@ _logger = logging.getLogger(__name__)
 async def cache_write(cache_key, data, _span):
     with _span.start_child(op='load_data.redis_set'):
         try:
-            await asyncio.wait_for(settings.REDIS_CONN.set(cache_key, json.dumps(data), ex=timedelta(seconds=60)), timeout=settings.REDIS_TIMEOUT_SET)
+            data = json.dumps(data)
+            _logger.debug("CACHE WRITE %s %s", cache_key, data)
+            await asyncio.wait_for(settings.REDIS_CONN.set(cache_key, data, ex=timedelta(seconds=60)), timeout=settings.REDIS_TIMEOUT_SET)
 
         except RedisTimeoutError:
             _logger.warning("CACHE TIMEOUT %s", cache_key)
@@ -83,7 +85,7 @@ def load_data(value, values, headers, _cache, _parent_span: Span):
                     _span.set_tag('cache_control', _response.headers.get('cache-control'))
 
                     if _response.headers.get('cache-control') != 'no-cache':
-                        asyncio.create_task(cache_write(cache_key, data, _span))
+                        await cache_write(cache_key, data, _span)
 
             else:
                 _span.set_tag('data.source', 'redis')
