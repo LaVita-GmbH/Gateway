@@ -84,51 +84,19 @@ def _load_related_data(
         pass
 
     if id:
-        if cache_key not in _cache:
-            _cache[cache_key] = asyncio.create_task(proxy(
-                method='GET',
-                service=relation[1],
-                path='/'.join([*relation[2:], id]),
-                params='',
-                headers=headers,
-                timeout=3.0,
-                _cache=_cache,
-                _parent_span=_parent_span,
-            ))
-
-        else:
-            _logger.debug("Request already in cache. cache_key=%s", cache_key)
+        return proxy(
+            method='GET',
+            service=relation[1],
+            path='/'.join([*relation[2:], id]),
+            params='',
+            headers=headers,
+            timeout=3.0,
+            _cache=_cache,
+            _parent_span=_parent_span,
+        )
 
     elif '$rel_params' in curr_obj:
         raise NotImplementedError
-        # cache_key += get_params()
-        # params = {key: resolve_placeholder(value) for key, value in curr_obj['$rel_params'].items()}
-        # if curr_obj.get('$rel_is_lookup'):
-        #     params['limit'] = 1
-
-        # if cache_key not in _cache:
-        #     try:
-        #         _response, data = await proxy('GET', relation[1], '/'.join(relation[2:]))
-        #         _cache[cache_key] = (data, datetime.utcnow())
-
-        #     except Exception:
-        #         _logger.warn("Failed to load referenced data for $rel='%s' with tenant_id='%s', error: %r", relation, tenant_id, error, exc_info=True)
-        #         return
-
-        # else:
-        #     data = _cache[cache_key][0]
-
-        # if curr_obj.get('$rel_is_lookup'):
-        #     cache_key += '[0]'
-        #     if cache_key not in _cache or datetime.utcnow() - _cache[cache_key][1] > self._referenced_data_expire:
-        #         try:
-        #             _cache[cache_key] = (objects[loc][0], datetime.utcnow())
-
-        #         except (KeyError, IndexError) as error:
-        #             _logger.warn("Failed to get object from lookup for $rel='%s' with tenant_id='%s', error: %r", relation, tenant_id, error, exc_info=True)
-        #             return
 
     else:
         raise NotImplementedError
-
-    return _cache[cache_key]

@@ -1,8 +1,12 @@
 import asyncio
+import logging
 from typing import Coroutine, Iterable, Optional
 from sentry_sdk import start_span
 from sentry_sdk.tracing import Span
 from .load import load_data
+
+
+_logger = logging.getLogger(__name__)
 
 
 async def analyze_data(values: dict, headers: dict = {}, parent: Optional[dict] = None, max_level: Optional[int] = None, _cache: Optional[dict] = None, _parent_span: Optional[Span] = None):
@@ -28,6 +32,7 @@ async def analyze_data(values: dict, headers: dict = {}, parent: Optional[dict] 
                 return
 
             if max_level and level > max_level:
+                _logger.debug("MAXIMUM RECURSION DEPTH REACHED %s", values)
                 return
 
             keys = list(values.keys())
