@@ -38,6 +38,8 @@ async def resolver(request: Request):
     if not request_headers.get('sentry-trace'):
         request_headers['sentry-trace'] = Hub.current.scope.transaction.to_traceparent()
 
+    _cleanup_callbacks = []
+
     try:
         response, data = await proxy(
             method=request.method,
@@ -46,6 +48,8 @@ async def resolver(request: Request):
             headers=request_headers,
             params=str(request.query_params),
             data=await request.body(),
+            _cache={},
+            _cleanup_callbacks=_cleanup_callbacks,
         )
 
     except InvalidURL as error:
@@ -59,6 +63,9 @@ async def resolver(request: Request):
             status_code=502,
             headers=cors_headers,
         )
+
+    for callback in _cleanup_callbacks:
+        callback()
 
     response_headers = {**response.headers, **cors_headers}
     try:
@@ -108,7 +115,7 @@ async def openapi(request: Request):
     }
 
     for service in settings.SERVICE_URLS.keys():
-        _, data = await proxy('GET', service, 'openapi.json', headers={}, params={})
+        _, data = await proxy('GET', service, 'openapi.json', headers={}, params={}, _cache={}, _cleanup_callbacks=[],)
         for path, config in data.get('paths', {}).items():
             if path == '/':
                 continue

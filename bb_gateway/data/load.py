@@ -9,56 +9,49 @@ from .utils import resolve_placeholder, get_cache_key
 _logger = logging.getLogger(__name__)
 
 
-def load_data(value, values: dict, headers, _cache, _parent_span: Span):
+async def load_data(value, values: dict, headers, _cache: dict, _cleanup_callbacks: list, _parent_span: Span):
     rel_path = [resolve_placeholder(part, curr_obj=values) for part in value.split('/')]
     cache_key = get_cache_key(rel_path, curr_obj=values, **values)
+    values['$rel'] = '/'.join(rel_path)
 
-    async def _load():
-        with _parent_span.start_child(op='load_data', description=value) as _span:
-            values['$rel'] = '/'.join(rel_path)
-            data = {}
-            try:
-                with _span.start_child(op='load_data.fetch') as __span:
-                    try:
-                        _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _parent_span=__span)
+    with _parent_span.start_child(op='load_data', description=value) as _span:
+        data = {}
+        try:
+            with _span.start_child(op='load_data.fetch') as __span:
+                _logger.debug("LOAD START %s", cache_key)
+                try:
+                    _response, related = await _load_related_data(rel_path, cache_key=cache_key, curr_obj=values, headers=headers, **values, _cache=_cache, _cleanup_callbacks=_cleanup_callbacks, _parent_span=__span)
 
-                    except asyncio.TimeoutError as error:
-                        _logger.warning("Timeout loading related data on %s", value)
-                        raise ValueError({
-                            'status': 504,
-                        })
-
-                    _span.set_tag('data.source', 'upstream')
-                    _span.set_http_status(_response.status)
-
-                if not _response.ok:
+                except asyncio.TimeoutError as error:
+                    _logger.warning("Timeout loading related data on %s", value)
                     raise ValueError({
-                        'status': _response.status,
-                        'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
+                        'status': 504,
                     })
 
-            except Exception as error:
-                _logger.warning("Cannot load data from %s", value)
-                data['$error'] = error.args[0]
+                else:
+                    _logger.debug("LOAD DONE %s", cache_key)
 
-            else:
-                data.update(related)
+                _span.set_tag('data.source', 'upstream')
+                _span.set_http_status(_response.status)
 
-                _span.set_tag('cache_control', _response.headers.get('cache-control'))
+            if not _response.ok:
+                raise ValueError({
+                    'status': _response.status,
+                    'data': await (_response.json() if 'application/json' in _response.content_type else _response.text()),
+                })
 
-            values.update(data)
+        except Exception as error:
+            _logger.warning("Cannot load data from %s", value)
+            data['$error'] = error.args[0]
 
-            return values
+        else:
+            data.update(related)
 
-    _cache_key = f'_load_{cache_key}'
-    if _cache_key not in _cache:
-        _logger.debug("LOAD_DATA FRESH %s", cache_key)
-        _cache[_cache_key] = asyncio.create_task(_load(), name=f'{cache_key}')
+            _span.set_tag('cache_control', _response.headers.get('cache-control'))
 
-    else:
-        _logger.debug("LOAD_DATA PENDING %s", cache_key)
+        values.update(data)
 
-    return _cache[_cache_key]
+        return values
 
 
 def _load_related_data(
@@ -67,14 +60,12 @@ def _load_related_data(
     curr_obj: dict,
     headers: dict = {},
     id: Optional[str] = None,
-    _cache: Optional[dict] = None,
     *,
+    _cache: dict,
+    _cleanup_callbacks: list,
     _parent_span: Span,
     **lookup,
 ) -> asyncio.Task[Tuple[ClientResponse, Any]]:
-    if _cache is None:
-        _cache = {}
-
     from ..resolver_proxy import proxy
 
     try:
@@ -92,6 +83,7 @@ def _load_related_data(
             headers=headers,
             timeout=3.0,
             _cache=_cache,
+            _cleanup_callbacks=_cleanup_callbacks,
             _parent_span=_parent_span,
         )
 
