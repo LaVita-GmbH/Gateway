@@ -23,6 +23,24 @@ async def resolver(request: Request):
 
     request_headers = {**request.headers}
 
+    api_token = request.headers.get('api-token') or request.query_params.get('api_token')
+
+    if api_token and not request.headers.get('authorization'):
+        response, data = await proxy(
+            method='POST',
+            service='access',
+            path='auth/transaction',
+            headers={
+                'content-type': 'application/json',
+            },
+            params='',
+            data=json.dumps({'access_token': api_token}),
+            _cache={},
+            _cleanup_callbacks=[],
+        )
+
+        request_headers['authorization'] = data['token']['transaction']
+
     cors_headers = {}
     if request_headers.get('origin') and DO_ADD_CORS_HEADERS:
         cors_headers = {
